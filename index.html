@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>DQMJRKA BET</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
@@ -25,43 +25,50 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = "dqmjrka-bet-v3";
+        const appId = "dqmjrka-bet-v4"; // Новая версия ID для чистоты данных
 
-        let user = null;
-        let userData = { balance: 0, usedPromos: [] };
-        let activeTab = 'slots';
+        let currentUid = null;
+        let balance = 0;
         let isMaintenance = false;
+        let usedPromos = [];
 
-        // Mines Game State
-        let minesCount = 5;
-        let minePositions = [];
-        let revealedCells = [];
-        let isMinesGameOver = false;
-        let currentMinesBet = 1;
-        let isGameStarted = false;
-
+        // Game state
         const symbols = ['💎', '🍒', '🍋', '🔔', '7️⃣', '🌟'];
         const ITEM_HEIGHT = 90;
 
-        // --- Auth & Sync ---
-        onAuthStateChanged(auth, async (u) => {
-            if (u) {
-                user = u;
-                const userRef = doc(db, 'artifacts', appId, 'users', u.uid, 'profile', 'data');
-                const snap = await getDoc(userRef);
-                if (!snap.exists()) await setDoc(userRef, { balance: 0, usedPromos: [], lastActive: Date.now() });
+        // Mines state
+        let minesCount = 5;
+        let minePositions = [];
+        let revealedCells = [];
+        let isMinesActive = false;
+        let currentMult = 1.0;
 
+        // --- AUTH ---
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                currentUid = user.uid;
+                const userRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
+                
+                // Проверка существования юзера
+                const snap = await getDoc(userRef);
+                if (!snap.exists()) {
+                    await setDoc(userRef, { balance: 0, usedPromos: [], lastActive: Date.now() });
+                }
+
+                // Подписка на данные юзера
                 onSnapshot(userRef, (d) => {
                     if (d.exists()) {
-                        userData = d.data();
-                        document.querySelectorAll('.balance-val').forEach(el => el.textContent = userData.balance);
+                        const data = d.data();
+                        balance = data.balance || 0;
+                        usedPromos = data.usedPromos || [];
+                        document.querySelectorAll('.balance-val').forEach(el => el.textContent = balance);
                     }
                 });
 
-                // Global Config
+                // Тех работы
                 onSnapshot(doc(db, 'artifacts', appId, 'public', 'config'), (d) => {
                     if (d.exists()) {
-                        isMaintenance = d.data().maintenance;
+                        isMaintenance = d.data().maintenance || false;
                         document.getElementById('m-screen').style.display = isMaintenance ? 'flex' : 'none';
                     }
                 });
@@ -70,20 +77,21 @@
             }
         });
 
-        // --- Navigation ---
+        // --- NAVIGATION ---
         window.switchTab = (tab) => {
-            activeTab = tab;
             document.querySelectorAll('.app-page').forEach(p => p.classList.remove('active'));
             document.getElementById(`${tab}-page`).classList.add('active');
-            
             document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-            document.querySelector(`[onclick="switchTab('${tab}')"]`).classList.add('active');
+            event.currentTarget.classList.add('active');
         };
 
-        // --- Slots Logic ---
+        // --- SLOTS ---
         window.spin = async () => {
-            if (userData.balance < 1 || isMaintenance) return;
-            const userRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
+            if (balance < 1 || isMaintenance) return;
+            const btn = document.getElementById('spin-btn');
+            btn.disabled = true;
+
+            const userRef = doc(db, 'artifacts', appId, 'users', currentUid, 'profile', 'data');
             await updateDoc(userRef, { balance: increment(-1) });
 
             const reels = [document.getElementById('r0'), document.getElementById('r1'), document.getElementById('r2')];
@@ -91,402 +99,398 @@
                 return new Promise(resolve => {
                     const target = symbols[Math.floor(Math.random() * symbols.length)];
                     const items = r.querySelectorAll('.s-item');
-                    items[items.length-1].textContent = target;
-                    const time = 1500 + i * 500;
-                    r.style.transition = `transform ${time}ms cubic-bezier(0.1, 0.9, 0.1, 1)`;
-                    r.style.transform = `translateY(-${(items.length-1) * ITEM_HEIGHT}px)`;
+                    items[items.length - 1].textContent = target;
+                    const duration = 1500 + (i * 400);
+                    
+                    r.style.transition = `transform ${duration}ms cubic-bezier(0.1, 0.9, 0.1, 1)`;
+                    r.style.transform = `translateY(-${(items.length - 1) * ITEM_HEIGHT}px)`;
+                    
                     setTimeout(() => {
                         r.style.transition = 'none';
                         r.style.transform = 'translateY(0)';
                         items.forEach(it => it.textContent = target);
                         resolve(target);
-                    }, time);
+                    }, duration);
                 });
             }));
 
             const counts = {};
             results.forEach(s => counts[s] = (counts[s] || 0) + 1);
             const max = Math.max(...Object.values(counts));
-            if (max >= 2) showWin(max);
-        };
 
-        function showWin(type) {
-            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-            const modal = document.getElementById('win-modal');
-            modal.style.display = 'flex';
-            const isJack = type === 3;
-            document.getElementById('win-title').textContent = isJack ? "JACKPOT!" : "BIG WIN!";
-            document.getElementById('win-opt1').textContent = isJack ? "+3 СПИНА" : "+2 СПИНА";
-            window.winType = type;
-        }
+            if (max >= 2) {
+                confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+                document.getElementById('win-modal').style.display = 'flex';
+                const isJack = max === 3;
+                document.getElementById('win-title').textContent = isJack ? "JACKPOT!" : "BIG WIN!";
+                document.getElementById('win-opt1').textContent = isJack ? "+3 СПИНА" : "+2 СПИНА";
+                window.lastWinType = max;
+            }
+            btn.disabled = false;
+        };
 
         window.claimWin = async (choice) => {
             document.getElementById('win-modal').style.display = 'none';
             if (choice === 1) {
-                const add = window.winType === 3 ? 3 : 2;
-                await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), { balance: increment(add) });
+                const add = window.lastWinType === 3 ? 3 : 2;
+                const userRef = doc(db, 'artifacts', appId, 'users', currentUid, 'profile', 'data');
+                await updateDoc(userRef, { balance: increment(add) });
             }
         };
 
-        // --- Mines Logic ---
+        // --- MINES ---
         window.initMines = () => {
             const grid = document.getElementById('mines-grid');
             grid.innerHTML = '';
             for (let i = 0; i < 25; i++) {
                 const cell = document.createElement('div');
                 cell.className = 'mine-cell';
-                cell.textContent = i + 1;
-                cell.onclick = () => revealMine(i, cell);
+                cell.innerHTML = '<div class="cell-inner">?</div>';
+                cell.onclick = () => revealCell(i, cell);
                 grid.appendChild(cell);
             }
-            isGameStarted = false;
-            revealedCells = [];
+            isMinesActive = false;
             document.getElementById('mines-action-btn').textContent = 'ИГРАТЬ';
-            document.getElementById('mines-multiplier').textContent = 'x1.00';
+            document.getElementById('mines-mult').textContent = 'x1.00';
         };
 
-        window.startMines = async () => {
-            if (isGameStarted) {
+        window.handleMinesAction = async () => {
+            const btn = document.getElementById('mines-action-btn');
+            if (!isMinesActive) {
+                // Start
+                if (balance < 1) return alert('Мало спинов');
+                const userRef = doc(db, 'artifacts', appId, 'users', currentUid, 'profile', 'data');
+                await updateDoc(userRef, { balance: increment(-1) });
+
+                minesCount = parseInt(document.getElementById('mine-count').value) || 3;
+                minePositions = [];
+                while(minePositions.length < minesCount) {
+                    let r = Math.floor(Math.random() * 25);
+                    if(!minePositions.includes(r)) minePositions.push(r);
+                }
+                
+                revealedCells = [];
+                isMinesActive = true;
+                currentMult = 1.0;
+                document.querySelectorAll('.mine-cell').forEach(c => c.className = 'mine-cell');
+                btn.textContent = 'ЗАБРАТЬ';
+            } else {
                 // Cashout
-                const mult = parseFloat(document.getElementById('mines-multiplier').textContent.replace('x', ''));
-                const win = Math.floor(currentMinesBet * mult);
-                await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), { balance: increment(win) });
-                alert(`Вы забрали ${win} спинов!`);
+                const win = Math.floor(1 * currentMult);
+                if (win > 0) {
+                    const userRef = doc(db, 'artifacts', appId, 'users', currentUid, 'profile', 'data');
+                    await updateDoc(userRef, { balance: increment(win) });
+                    alert(`Вы выиграли ${win} спинов!`);
+                }
                 initMines();
-                return;
             }
-
-            if (userData.balance < 1) return alert('Недостаточно спинов');
-            currentMinesBet = 1; 
-            await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), { balance: increment(-1) });
-            
-            minesCount = parseInt(document.getElementById('mine-count-input').value);
-            minePositions = [];
-            while(minePositions.length < minesCount) {
-                let r = Math.floor(Math.random() * 25);
-                if(!minePositions.includes(r)) minePositions.push(r);
-            }
-            
-            isGameStarted = true;
-            revealedCells = [];
-            isMinesGameOver = false;
-            document.querySelectorAll('.mine-cell').forEach(c => {
-                c.classList.remove('revealed', 'bomb', 'gem');
-                c.innerHTML = '';
-            });
-            document.getElementById('mines-action-btn').textContent = 'ЗАБРАТЬ';
         };
 
-        function revealMine(idx, el) {
-            if (!isGameStarted || revealedCells.includes(idx) || isMinesGameOver) return;
-            
+        function revealCell(idx, el) {
+            if (!isMinesActive || revealedCells.includes(idx)) return;
             revealedCells.push(idx);
-            el.classList.add('revealed');
             
             if (minePositions.includes(idx)) {
                 el.classList.add('bomb');
                 el.innerHTML = '<i class="fas fa-bomb"></i>';
-                isMinesGameOver = true;
-                isGameStarted = false;
-                setTimeout(() => {
-                    alert('БУМ! Вы проиграли.');
-                    initMines();
-                }, 500);
+                isMinesActive = false;
+                setTimeout(() => { alert('БОМБА! Вы проиграли.'); initMines(); }, 300);
             } else {
                 el.classList.add('gem');
                 el.innerHTML = '<i class="fas fa-gem"></i>';
-                updateMinesMultiplier();
+                // Рассчет множителя (упрощенный)
+                const n = 25;
+                const m = minesCount;
+                const r = revealedCells.length;
+                let mult = 1;
+                for(let i=0; i<r; i++) mult *= (n-i)/(n-m-i);
+                currentMult = mult;
+                document.getElementById('mines-mult').textContent = `x${mult.toFixed(2)}`;
             }
         }
 
-        function updateMinesMultiplier() {
-            const n = 25;
-            const m = minesCount;
-            const r = revealedCells.length;
-            
-            // Упрощенная формула коэффициента
-            let multiplier = 1;
-            for(let i=0; i<r; i++) {
-                multiplier *= (n - i) / (n - m - i);
-            }
-            document.getElementById('mines-multiplier').textContent = `x${multiplier.toFixed(2)}`;
-        }
-
-        // --- Promo ---
-        window.applyPromo = async () => {
+        // --- PROMO ---
+        window.activatePromo = async () => {
             const code = document.getElementById('promo-input').value.trim().toUpperCase();
-            if (!code || userData.usedPromos.includes(code)) return;
+            if (!code || usedPromos.includes(code)) return alert('Код неверный или уже использован');
             
-            const ref = doc(db, 'artifacts', appId, 'public', 'data', 'promocodes', code);
-            const snap = await getDoc(ref);
+            const promoRef = doc(db, 'artifacts', appId, 'public', 'data', 'promocodes', code);
+            const snap = await getDoc(promoRef);
+            
             if (snap.exists()) {
-                const d = snap.data();
-                if (d.uses >= d.maxUses) return alert('Код закончился');
-                await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), { 
-                    balance: increment(d.value),
+                const data = snap.data();
+                if (data.uses >= data.maxUses) return alert('Лимит кода исчерпан');
+                
+                const userRef = doc(db, 'artifacts', appId, 'users', currentUid, 'profile', 'data');
+                await updateDoc(userRef, { 
+                    balance: increment(data.value),
                     usedPromos: arrayUnion(code)
                 });
-                await updateDoc(ref, { uses: increment(1) });
-                alert('Успешно!');
+                await updateDoc(promoRef, { uses: increment(1) });
+                alert('Спины начислены!');
+                document.getElementById('promo-input').value = '';
+            } else {
+                alert('Такого кода нет');
             }
         };
 
-        // --- Admin ---
+        // --- ADMIN PANEL ---
         window.openAdmin = () => {
             const pass = prompt('Пароль:');
-            if (pass === '0501') document.getElementById('admin-modal').style.display = 'flex';
+            if (pass === '0501') {
+                document.getElementById('admin-modal').style.display = 'flex';
+                loadAdminUsers();
+                loadAdminPromos();
+            }
         };
 
-        window.loadUsers = async () => {
+        window.loadAdminUsers = async () => {
             const snap = await getDocs(collection(db, 'artifacts', appId, 'users'));
-            const list = document.getElementById('admin-user-list');
+            const list = document.getElementById('adm-user-list');
             list.innerHTML = '';
+            
             for (const uDoc of snap.docs) {
-                const prof = await getDoc(doc(db, 'artifacts', appId, 'users', uDoc.id, 'profile', 'data'));
-                if (prof.exists()) {
-                    const data = prof.data();
-                    const item = document.createElement('div');
-                    item.className = 'admin-user-card';
-                    item.innerHTML = `
+                const profile = await getDoc(doc(db, 'artifacts', appId, 'users', uDoc.id, 'profile', 'data'));
+                if (profile.exists()) {
+                    const data = profile.data();
+                    const card = document.createElement('div');
+                    card.className = 'admin-card';
+                    card.innerHTML = `
                         <div style="flex:1">
-                            <div style="font-size:0.7rem; opacity:0.5">ID: ${uDoc.id.slice(0,6)}...</div>
+                            <div style="font-size:0.6rem; opacity:0.5;">ID: ${uDoc.id.slice(0,8)}...</div>
                             <div style="font-weight:700">Спины: ${data.balance}</div>
                         </div>
-                        <button onclick="editUser('${uDoc.id}')" class="btn-edit">ИЗМЕНИТЬ</button>
+                        <div style="display:flex; gap:5px">
+                            <input type="number" id="inp-${uDoc.id}" style="width:50px; background:#111; border:1px solid #333; color:#fff; padding:5px; border-radius:5px">
+                            <button onclick="setBalance('${uDoc.id}')" style="background:var(--accent); border:none; color:#fff; padding:5px 10px; border-radius:5px; font-size:0.7rem">SET</button>
+                        </div>
                     `;
-                    list.appendChild(item);
+                    list.appendChild(card);
                 }
             }
         };
 
-        window.editUser = async (uid) => {
-            const val = prompt('Новый баланс:');
-            if (val !== null) {
-                await updateDoc(doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data'), { balance: parseInt(val) });
-                loadUsers();
+        window.setBalance = async (uid) => {
+            const val = parseInt(document.getElementById(`inp-${uid}`).value);
+            if (!isNaN(val)) {
+                await updateDoc(doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data'), { balance: val });
+                loadAdminUsers();
             }
         };
 
-        window.savePromo = async () => {
-            const name = document.getElementById('p-name').value.toUpperCase();
-            const val = parseInt(document.getElementById('p-val').value);
-            const max = parseInt(document.getElementById('p-max').value);
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promocodes', name), { value: val, maxUses: max, uses: 0 });
-            alert('Создан');
+        window.createPromo = async () => {
+            const name = document.getElementById('adm-p-name').value.toUpperCase();
+            const val = parseInt(document.getElementById('adm-p-val').value);
+            const max = parseInt(document.getElementById('adm-p-max').value);
+            if (name && val && max) {
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promocodes', name), {
+                    value: val, maxUses: max, uses: 0
+                });
+                alert('Промокод создан');
+                loadAdminPromos();
+            }
         };
 
-        window.toggleTech = async (val) => {
-            await setDoc(doc(db, 'artifacts', appId, 'public', 'config'), { maintenance: val });
+        window.loadAdminPromos = async () => {
+            const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'promocodes'));
+            const list = document.getElementById('adm-promo-list');
+            list.innerHTML = '';
+            snap.forEach(d => {
+                const data = d.data();
+                const item = document.createElement('div');
+                item.className = 'admin-card';
+                item.innerHTML = `
+                    <div style="flex:1">
+                        <div style="font-weight:800; color:var(--accent)">${d.id}</div>
+                        <div style="font-size:0.7rem; opacity:0.6">+${data.value}🎰 | ${data.uses}/${data.maxUses} акт.</div>
+                    </div>
+                    <button onclick="deletePromo('${d.id}')" style="background:#ef4444; border:none; color:#fff; padding:5px; border-radius:5px; font-size:0.6rem">DEL</button>
+                `;
+                list.appendChild(item);
+            });
         };
 
-        // --- Init ---
+        window.deletePromo = async (id) => {
+            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promocodes', id));
+            loadAdminPromos();
+        };
+
+        window.toggleTech = async (status) => {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'config'), { maintenance: status });
+        };
+
+        // --- INIT ---
         window.onload = () => {
             const reels = document.querySelectorAll('.s-reel');
             reels.forEach(r => {
-                for(let i=0; i<30; i++) {
-                    const div = document.createElement('div');
-                    div.className = 's-item';
-                    div.textContent = symbols[Math.floor(Math.random()*symbols.length)];
-                    r.appendChild(div);
+                for(let i=0; i<35; i++) {
+                    const d = document.createElement('div');
+                    d.className = 's-item';
+                    d.textContent = symbols[Math.floor(Math.random() * symbols.length)];
+                    r.appendChild(d);
                 }
             });
             initMines();
         };
+
+        window.closeModals = () => { document.querySelectorAll('.modal').forEach(m => m.style.display = 'none'); };
     </script>
 
     <style>
-        :root {
-            --bg: #0b0e11;
-            --card: #151a21;
-            --accent: #3b82f6;
-            --text: #ffffff;
-            --gray: #9ca3af;
-            --ios-tab: rgba(28, 28, 30, 0.85);
-        }
+        :root { --bg: #0d1117; --card: #161b22; --accent: #58a6ff; --text: #f0f6fc; --gray: #8b949e; --border: #30363d; }
+        
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
+        body { margin: 0; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
 
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { 
-            margin: 0; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); 
-            height: 100vh; overflow: hidden; display: flex; flex-direction: column;
-        }
+        /* HEADER */
+        header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+        .logo { font-weight: 800; letter-spacing: 2px; color: var(--accent); }
+        .bal-badge { background: var(--card); border: 1px solid var(--border); padding: 8px 15px; border-radius: 30px; font-weight: 700; font-size: 0.9rem; }
 
-        /* --- Header --- */
-        header { padding: 20px; display: flex; justify-content: space-between; align-items: center; }
-        .logo { font-weight: 900; font-size: 1.2rem; color: var(--accent); letter-spacing: 1px; }
-        .balance-chip { background: var(--card); padding: 8px 16px; border-radius: 20px; font-weight: 700; border: 1px solid #2d3748; }
-
-        /* --- Pages --- */
-        .app-page { flex: 1; overflow-y: auto; padding: 20px; padding-bottom: 100px; display: none; }
+        /* PAGES */
+        .app-page { display: none; height: calc(100vh - 140px); overflow-y: auto; padding: 20px; }
         .app-page.active { display: block; }
 
-        /* --- Slots --- */
-        .slots-wrap { background: var(--card); border-radius: 24px; padding: 20px; text-align: center; margin-top: 20px; border: 1px solid #2d3748; }
-        .s-container { display: flex; justify-content: center; gap: 10px; background: #000; padding: 10px; border-radius: 16px; margin: 20px 0; overflow: hidden; height: 110px; }
-        .s-window { width: 80px; height: 90px; background: #111; border-radius: 10px; overflow: hidden; position: relative; }
-        .s-reel { position: absolute; top: 0; width: 100%; display: flex; flex-direction: column; }
-        .s-item { height: 90px; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; }
-        .btn-spin { width: 100%; background: var(--accent); border: none; padding: 18px; border-radius: 16px; color: #fff; font-weight: 800; font-size: 1.1rem; cursor: pointer; }
+        /* SLOTS */
+        .slots-box { background: var(--card); padding: 25px; border-radius: 25px; border: 1px solid var(--border); text-align: center; }
+        .s-view { display: flex; justify-content: center; gap: 8px; background: #000; padding: 10px; border-radius: 15px; height: 110px; overflow: hidden; margin: 20px 0; }
+        .s-win { width: 80px; height: 90px; background: #0d1117; border-radius: 10px; position: relative; overflow: hidden; }
+        .s-reel { position: absolute; top:0; width:100%; display: flex; flex-direction: column; }
+        .s-item { height: 90px; display: flex; align-items: center; justify-content: center; font-size: 2.8rem; }
+        .btn-main { width: 100%; padding: 18px; border-radius: 15px; border: none; background: var(--accent); color: #fff; font-weight: 800; font-size: 1.1rem; cursor: pointer; transition: 0.2s; }
+        .btn-main:active { transform: scale(0.96); }
 
-        /* --- Mines --- */
-        .mines-header { display: flex; justify-content: space-between; margin-bottom: 20px; background: var(--card); padding: 15px; border-radius: 16px; }
-        .grid-5x5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
-        .mine-cell { 
-            aspect-ratio: 1; background: #2d3748; border-radius: 8px; display: flex; 
-            align-items: center; justify-content: center; font-weight: 700; font-size: 0.9rem;
-            transition: 0.2s; cursor: pointer; border-bottom: 3px solid #1a202c;
-        }
-        .mine-cell.revealed { background: #1a202c; border-bottom: none; transform: translateY(2px); }
-        .mine-cell.gem { color: #10b981; font-size: 1.5rem; }
-        .mine-cell.bomb { color: #ef4444; font-size: 1.5rem; }
-        .mines-ctrl { margin-top: 20px; background: var(--card); padding: 20px; border-radius: 20px; }
-        .m-input-group { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-        .m-input-group input { background: #000; border: 1px solid #2d3748; color: #fff; padding: 10px; border-radius: 10px; width: 60px; text-align: center; }
+        /* MINES */
+        .m-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 15px 0; }
+        .mine-cell { aspect-ratio: 1; background: var(--card); border: 1px solid var(--border); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; cursor: pointer; }
+        .mine-cell.gem { background: #1a3a2a; color: #39d353; font-size: 1.5rem; }
+        .mine-cell.bomb { background: #3a1a1a; color: #f85149; font-size: 1.5rem; }
+        .m-stats { display: flex; justify-content: space-between; padding: 10px; background: var(--card); border-radius: 12px; margin-bottom: 10px; }
 
-        /* --- iOS Tab Bar --- */
-        .tab-bar-container {
-            position: fixed; bottom: 25px; left: 50%; transform: translateX(-50%);
-            width: 90%; max-width: 400px; z-index: 1000;
-        }
-        .tab-bar {
-            background: var(--ios-tab); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-            display: flex; justify-content: space-around; align-items: center;
-            padding: 12px 10px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.1);
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        }
-        .nav-item { text-align: center; color: var(--gray); flex: 1; font-size: 0.65rem; font-weight: 500; transition: 0.3s; }
-        .nav-item i { font-size: 1.4rem; display: block; margin-bottom: 4px; }
-        .nav-item.active { color: var(--accent); transform: scale(1.1); }
+        /* NAV BAR (iOS STYLE) */
+        .nav-wrap { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 400px; z-index: 100; }
+        .nav-bar { background: rgba(22, 27, 34, 0.8); backdrop-filter: blur(15px); border: 1px solid var(--border); border-radius: 35px; display: flex; padding: 10px; }
+        .nav-item { flex: 1; text-align: center; color: var(--gray); font-size: 0.65rem; font-weight: 600; cursor: pointer; }
+        .nav-item i { display: block; font-size: 1.3rem; margin-bottom: 3px; }
+        .nav-item.active { color: var(--accent); }
 
-        /* --- Modals --- */
-        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: none; align-items: center; justify-content: center; z-index: 2000; padding: 20px; }
-        .modal-box { background: var(--card); width: 100%; max-width: 340px; padding: 30px; border-radius: 30px; text-align: center; border: 1px solid #2d3748; }
-        .btn-opt { width: 100%; padding: 15px; border-radius: 12px; border: none; margin-top: 10px; font-weight: 700; cursor: pointer; }
+        /* MODALS */
+        .modal { position: fixed; inset:0; background: rgba(0,0,0,0.8); z-index: 1000; display: none; align-items: center; justify-content: center; padding: 20px; }
+        .modal-box { background: var(--card); border: 1px solid var(--border); width: 100%; max-width: 350px; padding: 25px; border-radius: 25px; }
 
-        /* --- Admin --- */
-        .admin-user-card { background: #000; padding: 15px; border-radius: 12px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
-        .btn-edit { background: var(--accent); border: none; color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 0.7rem; font-weight: 700; }
+        /* ADMIN */
+        .admin-card { background: #0d1117; padding: 12px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 8px; display: flex; align-items: center; }
+        .adm-btn { width: 100%; padding: 10px; border-radius: 8px; border: none; margin-bottom: 5px; cursor: pointer; font-weight: 700; }
 
-        .promo-box { background: var(--card); border-radius: 20px; padding: 20px; margin-top: 20px; }
-        .input-promo { background: #000; border: 1px solid #2d3748; padding: 15px; width: 100%; border-radius: 12px; color: #fff; margin-bottom: 10px; }
+        .promo-input { width: 100%; background: #000; border: 1px solid var(--border); padding: 15px; border-radius: 12px; color: #fff; margin-bottom: 10px; font-size: 1rem; text-align: center; font-weight: 800; }
 
-        .m-screen { position: fixed; inset:0; background: #000; z-index: 5000; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
+        .m-screen { position: fixed; inset:0; background: #0d1117; z-index: 2000; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
     </style>
 </head>
 <body>
 
     <div id="m-screen" class="m-screen">
-        <i class="fas fa-tools" style="font-size: 4rem; color: var(--accent); margin-bottom: 20px;"></i>
-        <h1>ТЕХ. РАБОТЫ</h1>
-        <p style="opacity: 0.6;">Мы обновляем DQMJRKA BET. Вернемся совсем скоро!</p>
-        <button onclick="openAdmin()" style="margin-top: 40px; background: none; border: none; color: #222;">ADMIN</button>
+        <i class="fas fa-hammer" style="font-size: 3rem; color: var(--accent); margin-bottom: 20px;"></i>
+        <h1>ОБНОВЛЕНИЕ</h1>
+        <p style="opacity: 0.6;">Мы скоро вернемся. Наберитесь терпения!</p>
+        <button onclick="openAdmin()" style="margin-top: 50px; background: none; border: none; color: #222;">PANEL</button>
     </div>
 
     <header>
-        <div class="logo">DQMJRKA BET</div>
-        <div class="balance-chip"><i class="fas fa-coins" style="color: gold;"></i> <span class="balance-val">0</span></div>
+        <div class="logo">DQMJRKA</div>
+        <div class="bal-badge"><i class="fas fa-coins" style="color: gold;"></i> <span class="balance-val">0</span></div>
     </header>
 
-    <!-- SLOTS PAGE -->
+    <!-- SLOTS -->
     <div id="slots-page" class="app-page active">
-        <div class="slots-wrap">
-            <h2 style="margin: 0; font-size: 1rem; opacity: 0.6;">УДАЧНЫЙ СПИН</h2>
-            <div class="s-container">
-                <div class="s-window"><div class="s-reel" id="r0"></div></div>
-                <div class="s-window"><div class="s-reel" id="r1"></div></div>
-                <div class="s-window"><div class="s-reel" id="r2"></div></div>
+        <div class="slots-box">
+            <div class="s-view">
+                <div class="s-win"><div class="s-reel" id="r0"></div></div>
+                <div class="s-win"><div class="s-reel" id="r1"></div></div>
+                <div class="s-win"><div class="s-reel" id="r2"></div></div>
             </div>
-            <button class="btn-spin" onclick="spin()">ИГРАТЬ (1 🎰)</button>
+            <button class="btn-main" id="spin-btn" onclick="spin()">КРУТИТЬ (1 🎰)</button>
         </div>
-        <div style="text-align: center; margin-top: 30px; font-size: 0.7rem; opacity: 0.2;" onclick="openAdmin()">V3.0.1 PANEL</div>
+        <div style="text-align: center; margin-top: 40px; font-size: 0.6rem; opacity: 0.2;" onclick="openAdmin()">V4.0.1 SYSTEM</div>
     </div>
 
-    <!-- MINES PAGE -->
+    <!-- MINES -->
     <div id="mines-page" class="app-page">
-        <div class="mines-header">
-            <div>
-                <span style="display: block; font-size: 0.6rem; opacity: 0.5;">МНОЖИТЕЛЬ</span>
-                <span id="mines-multiplier" style="font-size: 1.5rem; font-weight: 800; color: #10b981;">x1.00</span>
-            </div>
-            <div style="text-align: right;">
-                <span style="display: block; font-size: 0.6rem; opacity: 0.5;">СТАВКА</span>
-                <span style="font-size: 1.2rem; font-weight: 700;">1 🎰</span>
-            </div>
+        <div class="m-stats">
+            <div><span style="font-size: 0.6rem; opacity: 0.5; display: block;">МНОЖИТЕЛЬ</span> <b id="mines-mult" style="color: #39d353;">x1.00</b></div>
+            <div style="text-align: right;"><span style="font-size: 0.6rem; opacity: 0.5; display: block;">СТАВКА</span> <b>1 🎰</b></div>
         </div>
-
-        <div class="grid-5x5" id="mines-grid"></div>
-
-        <div class="mines-ctrl">
-            <div class="m-input-group">
-                <span>Кол-во мин:</span>
-                <input type="number" id="mine-count-input" value="5" min="1" max="24">
+        <div class="m-grid" id="mines-grid"></div>
+        <div class="slots-box">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <span>Мины:</span>
+                <input type="number" id="mine-count" value="3" min="1" max="20" style="width: 60px; background: #000; border: 1px solid var(--border); color: #fff; padding: 8px; border-radius: 8px; text-align: center;">
             </div>
-            <button class="btn-spin" id="mines-action-btn" onclick="startMines()">ИГРАТЬ</button>
+            <button class="btn-main" id="mines-action-btn" onclick="handleMinesAction()">ИГРАТЬ</button>
         </div>
     </div>
 
-    <!-- PROFILE/PROMO PAGE -->
-    <div id="profile-page" class="app-page">
+    <!-- PROMO -->
+    <div id="promo-page" class="app-page">
         <h2>ПРОМОКОД</h2>
-        <div class="promo-box">
-            <input type="text" id="promo-input" class="input-promo" placeholder="ВВЕДИТЕ КОД...">
-            <button class="btn-spin" onclick="applyPromo()">АКТИВИРОВАТЬ</button>
+        <div class="slots-box">
+            <input type="text" id="promo-input" class="promo-input" placeholder="ВВЕДИТЕ КОД">
+            <button class="btn-main" onclick="activatePromo()">ПОДТВЕРДИТЬ</button>
         </div>
     </div>
 
-    <!-- iOS TAB BAR -->
-    <div class="tab-bar-container">
-        <div class="tab-bar">
+    <!-- NAVIGATION -->
+    <div class="nav-wrap">
+        <div class="nav-bar">
             <div class="nav-item active" onclick="switchTab('slots')">
-                <i class="fas fa-gamepad"></i>
+                <i class="fas fa-dice"></i>
                 <span>Слоты</span>
             </div>
             <div class="nav-item" onclick="switchTab('mines')">
                 <i class="fas fa-bomb"></i>
                 <span>Мины</span>
             </div>
-            <div class="nav-item" onclick="switchTab('profile')">
+            <div class="nav-item" onclick="switchTab('promo')">
                 <i class="fas fa-ticket-alt"></i>
                 <span>Промо</span>
             </div>
         </div>
     </div>
 
-    <!-- MODALS -->
+    <!-- WIN MODAL -->
     <div id="win-modal" class="modal">
-        <div class="modal-box">
+        <div class="modal-box" style="text-align: center;">
             <h1 id="win-title" style="color: var(--accent); margin-top: 0;">WIN!</h1>
-            <button class="btn-opt" id="win-opt1" onclick="claimWin(1)" style="background: var(--accent); color: #fff;"></button>
-            <button class="btn-opt" onclick="claimWin(2)" style="background: #2d3748; color: #fff;">ВЕРНУТЬ ВЕЩЬ</button>
+            <button class="btn-main" id="win-opt1" onclick="claimWin(1)" style="margin-bottom: 10px;">+2 СПИНА</button>
+            <button class="btn-main" onclick="claimWin(2)" style="background: #21262d;">ВЕРНУТЬ ВЕЩЬ</button>
         </div>
     </div>
 
+    <!-- ADMIN MODAL -->
     <div id="admin-modal" class="modal">
-        <div class="modal-box" style="text-align: left; max-height: 90vh; overflow-y: auto;">
-            <h2 style="margin-top: 0;">АДМИНКА</h2>
+        <div class="modal-box" style="max-height: 90vh; overflow-y: auto;">
+            <h3 style="margin-top: 0;">ПАНЕЛЬ УПРАВЛЕНИЯ</h3>
             
-            <div style="background: #000; padding: 15px; border-radius: 12px; margin-bottom: 20px;">
-                <p style="font-size: 0.7rem; margin: 0 0 10px 0;">ТЕХ. РАБОТЫ:</p>
-                <button onclick="toggleTech(true)" style="background: #ef4444; border:none; padding:8px; border-radius:5px; color:#fff;">ВКЛ</button>
-                <button onclick="toggleTech(false)" style="background: #10b981; border:none; padding:8px; border-radius:5px; color:#fff;">ВЫКЛ</button>
+            <div style="background: #000; padding: 15px; border-radius: 15px; margin-bottom: 20px;">
+                <p style="font-size: 0.7rem; margin-bottom: 10px;">ТЕХ. РАБОТЫ:</p>
+                <button class="adm-btn" onclick="toggleTech(true)" style="background: #f85149; color: #fff;">ВКЛЮЧИТЬ</button>
+                <button class="adm-btn" onclick="toggleTech(false)" style="background: #39d353; color: #fff;">ВЫКЛЮЧИТЬ</button>
             </div>
 
-            <p style="font-size: 0.8rem; font-weight: 700;">СОЗДАТЬ ПРОМО:</p>
-            <input id="p-name" placeholder="КОД" class="input-promo" style="padding: 10px;">
-            <input id="p-val" type="number" placeholder="СПИНЫ" class="input-promo" style="padding: 10px;">
-            <input id="p-max" type="number" placeholder="ЛИМИТ" class="input-promo" style="padding: 10px;">
-            <button class="btn-edit" style="width:100%; padding:10px; margin-bottom:20px" onclick="savePromo()">СОЗДАТЬ</button>
+            <p style="font-size: 0.8rem; font-weight: 700;">ПРОМО:</p>
+            <input id="adm-p-name" placeholder="КОД" class="promo-input" style="padding: 10px; font-size: 0.8rem;">
+            <input id="adm-p-val" type="number" placeholder="СПИНЫ" class="promo-input" style="padding: 10px; font-size: 0.8rem;">
+            <input id="adm-p-max" type="number" placeholder="АКТИВАЦИИ" class="promo-input" style="padding: 10px; font-size: 0.8rem;">
+            <button class="adm-btn" onclick="createPromo()" style="background: var(--accent); color: #fff;">СОЗДАТЬ</button>
+            <div id="adm-promo-list"></div>
 
-            <p style="font-size: 0.8rem; font-weight: 700;">ЮЗЕРЫ:</p>
-            <button onclick="loadUsers()" class="btn-edit" style="width:100%; padding:10px; margin-bottom:10px">ОБНОВИТЬ СПИСОК</button>
-            <div id="admin-user-list"></div>
+            <p style="font-size: 0.8rem; font-weight: 700; margin-top: 20px;">ПОЛЬЗОВАТЕЛИ:</p>
+            <button class="adm-btn" onclick="loadAdminUsers()" style="background: #21262d; color: #fff;">ОБНОВИТЬ СПИСОК</button>
+            <div id="adm-user-list"></div>
 
-            <button class="btn-opt" onclick="closeAdmin()" style="background: #2d3748; color: #fff;">ЗАКРЫТЬ</button>
+            <button class="btn-main" onclick="closeModals()" style="background: #21262d; margin-top: 20px;">ЗАКРЫТЬ</button>
         </div>
     </div>
-
-    <script>
-        window.closeAdmin = () => document.getElementById('admin-modal').style.display = 'none';
-    </script>
 
 </body>
 </html>
