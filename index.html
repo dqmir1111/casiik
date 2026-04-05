@@ -45,6 +45,7 @@
                 const snap = await getDoc(userRef);
                 
                 if (!snap.exists()) {
+                    // НАЧАЛЬНЫЙ БАЛАНС 0
                     await setDoc(userRef, { balance: 0, usedPromos: [] });
                     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_balances', user.uid), { balance: 0 });
                 }
@@ -59,7 +60,8 @@
                 onSnapshot(doc(db, 'artifacts', appId, 'public', 'config'), (d) => {
                     if (d.exists()) {
                         window.isMaintenance = d.data().maintenance || false;
-                        document.getElementById('m-screen').style.display = window.isMaintenance ? 'flex' : 'none';
+                        const mScreen = document.getElementById('m-screen');
+                        if(mScreen) mScreen.style.display = window.isMaintenance ? 'flex' : 'none';
                     }
                 });
             }
@@ -82,10 +84,15 @@
 
         // ADMIN
         window.openAdmin = () => {
-            const pass = prompt('Пароль:');
+            const pass = prompt('Пароль администратора:');
             if (pass === '0501') {
-                document.getElementById('admin-modal').style.display = 'flex';
-                window.switchAdminTab('create');
+                const modal = document.getElementById('admin-modal');
+                if(modal) {
+                    modal.style.display = 'flex';
+                    window.switchAdminTab('create');
+                }
+            } else if (pass !== null) {
+                alert('Неверный пароль');
             }
         };
 
@@ -94,29 +101,36 @@
             document.querySelectorAll('.adm-tab').forEach(b => b.classList.remove('active'));
             const view = document.getElementById('adm-v-' + t);
             if (view) view.style.display = 'block';
-            event.target.classList.add('active');
+            
+            const tabs = document.querySelectorAll('.adm-tab');
+            tabs.forEach(tab => {
+                if(tab.getAttribute('onclick').includes(t)) tab.classList.add('active');
+            });
+
             if(t==='list') window.loadAdminCodes();
             if(t==='users') window.loadAdminUsers();
         };
 
         window.loadAdminUsers = async () => {
             const list = document.getElementById('adm-user-list');
-            list.innerHTML = '<div class="loader">...</div>';
-            const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'user_balances'));
-            list.innerHTML = '';
-            snap.forEach(d => {
-                list.innerHTML += `<div class="adm-item">
-                    <span>${d.id.slice(0,6)}.. (${d.data().balance}₽)</span>
-                    <div style="display:flex; gap:5px">
-                        <button onclick="window.setBal('${d.id}')" style="background:var(--accent)">$</button>
-                        <button onclick="window.delUser('${d.id}')" style="background:#ef4444">УДАЛИТЬ</button>
-                    </div>
-                </div>`;
-            });
+            list.innerHTML = '<div style="padding:10px;text-align:center;">Загрузка...</div>';
+            try {
+                const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'user_balances'));
+                list.innerHTML = '';
+                snap.forEach(d => {
+                    list.innerHTML += `<div class="adm-item">
+                        <span style="font-size:0.7rem;">ID: ${d.id.slice(0,6)}.. (${d.data().balance}₽)</span>
+                        <div style="display:flex; gap:5px">
+                            <button onclick="window.setBal('${d.id}')" style="background:var(--accent); color:white; border:none; padding:4px 8px; border-radius:5px;">$</button>
+                            <button onclick="window.delUser('${d.id}')" style="background:#ef4444; color:white; border:none; padding:4px 8px; border-radius:5px;">DEL</button>
+                        </div>
+                    </div>`;
+                });
+            } catch(e) { list.innerHTML = "Ошибка прав"; }
         };
 
         window.delUser = async (uid) => {
-            if(confirm('Удалить пользователя ' + uid + '? Это сотрет баланс.')) {
+            if(confirm('Удалить пользователя ' + uid + '? Все данные будут стерты.')) {
                 await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_balances', uid));
                 await deleteDoc(doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data'));
                 window.loadAdminUsers();
@@ -124,7 +138,7 @@
         };
 
         window.setBal = async (uid) => {
-            const v = parseInt(prompt('Сумма:'));
+            const v = parseInt(prompt('Установить баланс (₽):'));
             if(!isNaN(v)) {
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_balances', uid), { balance: v }, { merge: true });
                 await updateDoc(doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data'), { balance: v });
@@ -133,36 +147,48 @@
         };
 
         window.createCode = async () => {
-            const name = document.getElementById('adm-n').value.toUpperCase();
+            const name = document.getElementById('adm-n').value.toUpperCase().trim();
             const val = parseInt(document.getElementById('adm-v').value);
             const max = parseInt(document.getElementById('adm-m').value);
-            if(!name || isNaN(val)) return alert("Error");
+            if(!name || isNaN(val)) return alert("Заполните все поля");
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promocodes', name), { val, max, uses: 0 });
-            alert("OK");
+            alert("Промокод создан!");
+            document.getElementById('adm-n').value = '';
+            document.getElementById('adm-v').value = '';
+            document.getElementById('adm-m').value = '';
         };
 
         window.loadAdminCodes = async () => {
             const list = document.getElementById('adm-code-list');
-            list.innerHTML = '<div class="loader">...</div>';
+            list.innerHTML = '<div style="padding:10px;text-align:center;">Загрузка...</div>';
             const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'promocodes'));
             list.innerHTML = '';
             snap.forEach(d => {
                 const data = d.data();
                 list.innerHTML += `<div class="adm-item">
                     <b>${d.id}</b>: ${data.val}₽ (${data.uses}/${data.max})
-                    <button onclick="window.delCode('${d.id}')">X</button>
+                    <button onclick="window.delCode('${d.id}')" style="background:#ef4444; color:white; border:none; padding:4px 8px; border-radius:5px;">X</button>
                 </div>`;
             });
         };
 
-        window.delCode = async (id) => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promocodes', id)); window.loadAdminCodes(); };
-        window.setTech = async (s) => { await setDoc(doc(db, 'artifacts', appId, 'public', 'config'), { maintenance: s }); };
+        window.delCode = async (id) => { 
+            if(confirm('Удалить код?')) {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promocodes', id)); 
+                window.loadAdminCodes(); 
+            }
+        };
+
+        window.setTech = async (s) => { 
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'config'), { maintenance: s }); 
+            alert(s ? "Техработы включены" : "Техработы выключены");
+        };
 
         // SLOTS
         const symbols = ['💎', '7️⃣', '🍒', '🍋', '🔔', '🌟'];
         window.spin = async () => {
             const bet = parseInt(document.getElementById('slots-bet').value);
-            if (bet < 1 || window.userBalance < bet) return alert("Error");
+            if (bet < 1 || window.userBalance < bet) return alert("Недостаточно баланса или неверная ставка");
 
             const btn = document.getElementById('spin-btn');
             btn.disabled = true;
@@ -174,7 +200,7 @@
                     const target = symbols[Math.floor(Math.random() * symbols.length)];
                     const items = r.querySelectorAll('.s-item');
                     items[items.length - 1].textContent = target;
-                    const duration = 2500; // Ровно 2.5 секунды
+                    const duration = 2500; // РОВНО 2.5 СЕКУНДЫ
                     r.style.transition = `transform ${duration}ms cubic-bezier(0.45, 0.05, 0.55, 0.95)`;
                     r.style.transform = `translateY(-${(items.length - 1) * 90}px)`;
                     setTimeout(() => {
@@ -191,8 +217,8 @@
             const max = Math.max(...Object.values(counts));
             if (max >= 2) {
                 const win = max === 3 ? bet * 10 : bet * 2;
-                confetti({ particleCount: 150, spread: 60 });
-                setTimeout(() => { window.updateBalance(win); }, 100);
+                confetti({ particleCount: 150, spread: 60, origin: { y: 0.7 } });
+                setTimeout(() => { window.updateBalance(win); }, 200);
             }
             btn.disabled = false;
         };
@@ -201,6 +227,7 @@
         let minesActive = false, minePos = [], revCells = [], curBet = 0, curMinesCount = 3;
         window.initMines = () => {
             const grid = document.getElementById('mines-grid');
+            if(!grid) return;
             grid.innerHTML = '';
             for (let i = 0; i < 25; i++) {
                 const c = document.createElement('div');
@@ -212,7 +239,7 @@
                     if (minePos.includes(i)) {
                         c.className = 'mine-cell bomb'; c.innerHTML = '💣';
                         minesActive = false;
-                        setTimeout(() => { alert('BOOM!'); window.initMines(); }, 300);
+                        setTimeout(() => { alert('ВЗРЫВ!'); window.initMines(); }, 300);
                     } else {
                         c.className = 'mine-cell gem'; c.innerHTML = '💎';
                         const n=25, m=curMinesCount, r=revCells.length;
@@ -232,7 +259,7 @@
             if (!minesActive) {
                 const bet = parseInt(document.getElementById('mines-bet').value);
                 const count = parseInt(document.getElementById('mine-count').value);
-                if (bet < 1 || window.userBalance < bet) return alert("Check balance");
+                if (bet < 1 || window.userBalance < bet) return alert("Проверьте ставку и баланс");
                 curBet = bet; curMinesCount = count;
                 await window.updateBalance(-bet);
                 minePos = []; while(minePos.length < count) {
@@ -244,7 +271,8 @@
                 });
                 document.getElementById('mines-btn').textContent = 'ВЫВЕСТИ';
             } else {
-                const mult = parseFloat(document.getElementById('mines-mult').textContent.replace('x',''));
+                const multStr = document.getElementById('mines-mult').textContent.replace('x','');
+                const mult = parseFloat(multStr);
                 await window.updateBalance(Math.floor(curBet * mult));
                 window.initMines();
             }
@@ -252,16 +280,25 @@
 
         window.usePromo = async () => {
             const code = document.getElementById('promo-input').value.trim().toUpperCase();
+            if(!code) return;
             const ref = doc(db, 'artifacts', appId, 'public', 'data', 'promocodes', code);
             const snap = await getDoc(ref);
             if (snap.exists()) {
                 const d = snap.data();
                 if (d.uses < d.max) {
+                    // Проверка на повторное использование
+                    const userRef = doc(db, 'artifacts', appId, 'users', window.currentUid, 'profile', 'data');
+                    const userSnap = await getDoc(userRef);
+                    const used = userSnap.data().usedPromos || [];
+                    if(used.includes(code)) return alert("Вы уже использовали этот код!");
+
                     await window.updateBalance(d.val);
                     await updateDoc(ref, { uses: increment(1) });
-                    alert("Успешно!");
-                } else alert("Лимит");
-            }
+                    await updateDoc(userRef, { usedPromos: arrayUnion(code) });
+                    alert(`Активировано! +${d.val} ₽`);
+                    document.getElementById('promo-input').value = '';
+                } else alert("Лимит использований исчерпан");
+            } else alert("Код не найден");
         };
 
         window.onload = () => {
@@ -285,20 +322,20 @@
         }
         body { margin: 0; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); overflow: hidden; height: 100vh; }
         
-        header { padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; background: var(--card); border-bottom: 1px solid var(--border); box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+        header { padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; background: var(--card); border-bottom: 1px solid var(--border); box-shadow: 0 4px 20px rgba(0,0,0,0.3); z-index: 10; }
         .logo { font-weight: 900; font-size: 1.4rem; color: var(--accent); text-shadow: 0 0 10px var(--accent-glow); }
         .balance-badge { background: #000; padding: 6px 14px; border-radius: 12px; font-weight: 800; border: 1px solid var(--accent); color: #22c55e; display: flex; align-items: center; gap: 5px; }
 
-        .app-page { display: none; padding: 15px; height: calc(100vh - 130px); overflow-y: auto; }
+        .app-page { display: none; padding: 10px; height: calc(100vh - 120px); overflow-y: auto; }
         .app-page.active { display: block; }
 
-        .card { background: var(--card); padding: 15px; border-radius: 16px; border: 1px solid var(--border); margin-bottom: 10px; position: relative; overflow: hidden; }
+        .card { background: var(--card); padding: 12px; border-radius: 16px; border: 1px solid var(--border); margin-bottom: 8px; position: relative; }
         
-        .input-box { background: rgba(0,0,0,0.4); padding: 12px; border-radius: 12px; border: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .input-box { background: rgba(0,0,0,0.4); padding: 10px; border-radius: 12px; border: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
         .input-box input { background: transparent; border: none; color: #fff; width: 80px; text-align: right; font-weight: 800; font-size: 1.1rem; outline: none; }
-        .input-box span { font-weight: 600; font-size: 0.85rem; opacity: 0.8; }
+        .input-box span { font-weight: 600; font-size: 0.8rem; opacity: 0.7; }
 
-        .s-view { display: flex; gap: 8px; justify-content: center; height: 90px; margin: 15px 0; }
+        .s-view { display: flex; gap: 8px; justify-content: center; height: 90px; margin: 10px 0; }
         .s-reel-box { width: 80px; height: 90px; position: relative; overflow: hidden; background: #000; border-radius: 12px; border: 1px solid var(--border); }
         .s-reel { position: absolute; width: 100%; top: 0; }
         .s-item { height: 90px; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; }
@@ -307,39 +344,42 @@
         .btn:active { transform: scale(0.97); }
         .btn:disabled { opacity: 0.4; pointer-events: none; }
 
-        .m-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 15px 0; }
-        .mine-cell { aspect-ratio: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; cursor: pointer; transition: 0.2s; }
-        .mine-cell.disabled { opacity: 0.3; background: #1a1a1a; cursor: default; }
+        .m-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; margin: 10px 0; }
+        .mine-cell { aspect-ratio: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer; transition: 0.2s; }
+        .mine-cell.disabled { opacity: 0.3; background: #1a1a1a; cursor: default; color: #444; }
         .mine-cell.gem { background: #059669; box-shadow: inset 0 0 15px #10b981; }
         .mine-cell.bomb { background: #dc2626; box-shadow: inset 0 0 15px #ef4444; }
 
-        .nav { position: fixed; bottom: 15px; left: 15px; right: 15px; background: rgba(26, 22, 53, 0.95); border: 1px solid var(--border); border-radius: 18px; display: flex; padding: 8px; backdrop-filter: blur(15px); z-index: 999; }
-        .nav-item { flex: 1; text-align: center; font-size: 0.75rem; color: #94a3b8; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .nav { position: fixed; bottom: 12px; left: 12px; right: 12px; background: rgba(26, 22, 53, 0.95); border: 1px solid var(--border); border-radius: 18px; display: flex; padding: 6px; backdrop-filter: blur(15px); z-index: 100; }
+        .nav-item { flex: 1; text-align: center; font-size: 0.7rem; color: #94a3b8; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; }
         .nav-item.active { color: var(--accent); }
-        .nav-item i { font-size: 1.3rem; }
+        .nav-item i { font-size: 1.2rem; }
 
-        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: none; align-items: center; justify-content: center; z-index: 10000; padding: 15px; }
-        .modal-box { background: var(--card); border: 1px solid var(--accent); padding: 20px; border-radius: 24px; width: 100%; max-width: 360px; box-shadow: 0 0 40px rgba(0,0,0,0.5); }
+        /* MODAL ADMIN - ВЫСОКИЙ Z-INDEX */
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 999999; padding: 15px; }
+        .modal-box { background: var(--card); border: 1px solid var(--accent); padding: 18px; border-radius: 20px; width: 100%; max-width: 360px; box-shadow: 0 0 50px rgba(0,0,0,0.8); }
 
-        .adm-tabs { display: flex; gap: 5px; margin-bottom: 15px; }
-        .adm-tab { flex: 1; padding: 10px; font-size: 0.7rem; background: #000; border: 1px solid var(--border); color: #fff; border-radius: 8px; font-weight: 800; }
+        .adm-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+        .adm-tab { flex: 1; padding: 10px; font-size: 0.65rem; background: #000; border: 1px solid var(--border); color: #fff; border-radius: 8px; font-weight: 800; cursor: pointer; }
         .adm-tab.active { background: var(--accent); border-color: var(--accent); }
-        .adm-view { display: none; max-height: 350px; overflow-y: auto; }
-        .adm-item { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 10px; margin-bottom: 8px; font-size: 0.8rem; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border); }
-        .adm-item button { border: none; padding: 5px 8px; border-radius: 6px; color: #fff; cursor: pointer; font-weight: 700; font-size: 0.7rem; }
+        .adm-view { display: none; max-height: 320px; overflow-y: auto; }
+        .adm-item { background: rgba(0,0,0,0.4); padding: 10px; border-radius: 10px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border); }
 
-        .m-screen { position: fixed; inset: 0; background: var(--bg); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 99999; }
+        /* ЭКРАН ТЕХРАБОТ - НИЖЕ МОДАЛКИ */
+        .m-screen { position: fixed; inset: 0; background: var(--bg); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 888888; text-align: center; padding: 20px; }
         
-        .admin-trigger { text-align: center; margin-top: 30px; }
-        .admin-btn { background: var(--border); color: #fff; border: none; padding: 8px 16px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; opacity: 0.5; cursor: pointer; }
+        .admin-trigger { text-align: center; margin-top: 25px; margin-bottom: 40px; }
+        .admin-btn { background: var(--border); color: #fff; border: none; padding: 8px 16px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; opacity: 0.4; cursor: pointer; }
     </style>
 </head>
 <body>
 
+    <!-- ЭКРАН ТЕХРАБОТ -->
     <div id="m-screen" class="m-screen">
-        <i class="fas fa-hammer" style="font-size: 4rem; color: var(--accent); margin-bottom: 20px;"></i>
-        <h2 style="font-weight: 900;">ТЕХНИЧЕСКИЕ РАБОТЫ</h2>
-        <button onclick="window.openAdmin()" style="margin-top: 20px; opacity: 0.1; background: none; border: none; color: #fff;">ADM</button>
+        <i class="fas fa-hammer" style="font-size: 3.5rem; color: var(--accent); margin-bottom: 20px; text-shadow: 0 0 20px var(--accent-glow);"></i>
+        <h2 style="font-weight: 900; letter-spacing: 1px;">ТЕХНИЧЕСКИЕ РАБОТЫ</h2>
+        <p style="opacity: 0.6; font-size: 0.9rem; max-width: 250px;">Мы скоро вернемся с новыми обновлениями!</p>
+        <button onclick="window.openAdmin()" style="margin-top: 40px; background: none; border: 1px solid #333; color: #555; padding: 8px 15px; border-radius: 20px; font-size: 0.6rem; cursor: pointer;">ADMIN ACCESS</button>
     </div>
 
     <header>
@@ -347,12 +387,12 @@
         <div class="balance-badge"><span class="balance-val">0</span> ₽</div>
     </header>
 
-    <!-- SLOTS -->
+    <!-- СЛОТЫ -->
     <div id="slots-page" class="app-page active">
         <div class="card">
             <div class="input-box">
-                <span>ВАША СТАВКА</span>
-                <input type="number" id="slots-bet" value="100">
+                <span>СТАВКА (₽)</span>
+                <input type="number" id="slots-bet" value="10">
             </div>
             <div class="s-view">
                 <div class="s-reel-box"><div class="s-reel" id="r0"></div></div>
@@ -366,21 +406,21 @@
         </div>
     </div>
 
-    <!-- MINES -->
+    <!-- МИНЫ -->
     <div id="mines-page" class="app-page">
         <div class="card" style="border-color: #22c55e; padding: 10px; margin-bottom: 8px;">
             <div style="display: flex; justify-content: space-between; font-weight: 900; color: #22c55e;">
-                <span>ТЕКУЩИЙ МНОЖИТЕЛЬ</span>
+                <span style="font-size: 0.8rem;">МНОЖИТЕЛЬ</span>
                 <span id="mines-mult">x1.00</span>
             </div>
         </div>
         <div class="card">
             <div class="input-box">
                 <span>СТАВКА</span>
-                <input type="number" id="mines-bet" value="100">
+                <input type="number" id="mines-bet" value="10">
             </div>
             <div class="input-box">
-                <span>КОЛ-ВО МИН</span>
+                <span>МИНЫ</span>
                 <input type="number" id="mine-count" value="3" min="1" max="24">
             </div>
             <div class="m-grid" id="mines-grid"></div>
@@ -388,22 +428,23 @@
         </div>
     </div>
 
-    <!-- PROMO -->
+    <!-- ПРОМО -->
     <div id="promo-page" class="app-page">
         <div class="card">
-            <h3 style="margin: 0 0 15px 0; text-align: center; font-weight: 900;">АКТИВАЦИЯ ПРОМО</h3>
-            <input type="text" id="promo-input" placeholder="ВВЕДИТЕ КОД" style="width: 100%; padding: 15px; border-radius: 12px; background: #000; border: 1px solid var(--border); color: #fff; text-align: center; margin-bottom: 15px; font-weight: 800; font-size: 1.2rem;">
-            <button class="btn" onclick="window.usePromo()">ПРИМЕНИТЬ</button>
+            <h3 style="margin: 0 0 15px 0; text-align: center; font-weight: 900; color: var(--accent);">ПРОМОКОД</h3>
+            <input type="text" id="promo-input" placeholder="ВВЕДИТЕ КОД" style="width: 100%; padding: 15px; border-radius: 12px; background: #000; border: 1px solid var(--border); color: #fff; text-align: center; margin-bottom: 15px; font-weight: 800; font-size: 1.2rem; box-sizing: border-box;">
+            <button class="btn" onclick="window.usePromo()">АКТИВИРОВАТЬ</button>
         </div>
     </div>
 
+    <!-- НАВИГАЦИЯ -->
     <div class="nav">
         <div class="nav-item active" id="nav-slots" onclick="window.switchTab('slots')"><i class="fas fa-gamepad"></i>Слоты</div>
         <div class="nav-item" id="nav-mines" onclick="window.switchTab('mines')"><i class="fas fa-bomb"></i>Мины</div>
         <div class="nav-item" id="nav-promo" onclick="window.switchTab('promo')"><i class="fas fa-gift"></i>Промо</div>
     </div>
 
-    <!-- MODAL ADMIN -->
+    <!-- МОДАЛКА АДМИНА -->
     <div id="admin-modal" class="modal">
         <div class="modal-box">
             <div class="adm-tabs">
@@ -413,13 +454,14 @@
             </div>
 
             <div id="adm-v-create" class="adm-view" style="display: block;">
-                <input id="adm-n" placeholder="КОД" class="btn" style="background:#000; margin-bottom:5px; border:1px solid var(--border); text-align:left;">
-                <input id="adm-v" type="number" placeholder="СУММА" class="btn" style="background:#000; margin-bottom:5px; border:1px solid var(--border); text-align:left;">
-                <input id="adm-m" type="number" placeholder="ЛИМИТ" class="btn" style="background:#000; margin-bottom:15px; border:1px solid var(--border); text-align:left;">
+                <input id="adm-n" placeholder="НАЗВАНИЕ КОДА" class="btn" style="background:#000; margin-bottom:6px; border:1px solid var(--border); text-align:left; font-size:0.8rem;">
+                <input id="adm-v" type="number" placeholder="СУММА (₽)" class="btn" style="background:#000; margin-bottom:6px; border:1px solid var(--border); text-align:left; font-size:0.8rem;">
+                <input id="adm-m" type="number" placeholder="ЛИМИТ" class="btn" style="background:#000; margin-bottom:12px; border:1px solid var(--border); text-align:left; font-size:0.8rem;">
                 <button class="btn" onclick="window.createCode()" style="background: #22c55e;">СОЗДАТЬ</button>
-                <div style="margin-top: 15px; display: flex; gap: 5px;">
-                    <button class="btn" onclick="window.setTech(true)" style="background: #ef4444; font-size: 0.7rem;">ВКЛ ТЕХ</button>
-                    <button class="btn" onclick="window.setTech(false)" style="background: #22c55e; font-size: 0.7rem;">ВЫКЛ ТЕХ</button>
+                
+                <div style="margin-top: 20px; display: flex; gap: 5px;">
+                    <button class="btn" onclick="window.setTech(true)" style="background: #ef4444; font-size: 0.6rem; padding: 10px;">ВКЛ ТЕХ</button>
+                    <button class="btn" onclick="window.setTech(false)" style="background: #22c55e; font-size: 0.6rem; padding: 10px;">ВЫКЛ ТЕХ</button>
                 </div>
             </div>
 
@@ -431,10 +473,9 @@
                 <div id="adm-user-list"></div>
             </div>
 
-            <button class="btn" onclick="document.getElementById('admin-modal').style.display='none'" style="background: #444; margin-top: 15px; box-shadow: none;">ЗАКРЫТЬ</button>
+            <button class="btn" onclick="document.getElementById('admin-modal').style.display='none'" style="background: #334155; margin-top: 15px; box-shadow: none;">ЗАКРЫТЬ</button>
         </div>
     </div>
 
 </body>
 </html>
-
