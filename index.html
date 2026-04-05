@@ -45,8 +45,8 @@
                 const snap = await getDoc(userRef);
                 
                 if (!snap.exists()) {
-                    await setDoc(userRef, { balance: 500, usedPromos: [] });
-                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_balances', user.uid), { balance: 500 });
+                    await setDoc(userRef, { balance: 0, usedPromos: [] });
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'user_balances', user.uid), { balance: 0 });
                 }
 
                 onSnapshot(userRef, (d) => {
