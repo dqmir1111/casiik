@@ -362,8 +362,9 @@
             btn.disabled = false;
         };
 
-        // ================= MINES =================
+// МИНЫ (ОБНОВЛЕННАЯ ЛОГИКА ИКСОВ)
         let minesActive = false, minePos = [], revCells = [], curBet = 0, curMinesCount = 3;
+        
         window.initMines = () => {
             const grid = document.getElementById('mines-grid');
             if(!grid) return;
@@ -381,8 +382,35 @@
                         setTimeout(() => { alert('ВЗРЫВ!'); window.initMines(); }, 300);
                     } else {
                         c.className = 'mine-cell gem'; c.innerHTML = '💎';
-                        const n=25, m=curMinesCount, r=revCells.length;
-                        let mult = 1; for(let j=0; j<r; j++) mult *= (n-j)/(n-m-j);
+                        
+                        const r = revCells.length; // сколько ячеек открыто
+                        const m = curMinesCount;    // сколько мин на поле
+                        let mult = 1;
+
+                        // ЛОГИКА ФИКСИРОВАННЫХ ИКСОВ
+                        if (m === 1) {
+                            const steps = {
+                                1: 1.05, 2: 1.09, 3: 1.15, 4: 1.20, 5: 1.30, 
+                                6: 1.40, 7: 1.70, 8: 2.00, 9: 2.50, 10: 3.00, 
+                                11: 4.00, 12: 5.00
+                            };
+                            // Если больше 12 шагов, прибавляем по +1x за шаг
+                            mult = steps[r] || (5.00 + (r - 12));
+                        } 
+                        else if (m >= 20) {
+                            const steps = { 1: 5.0, 2: 10.0, 3: 20.0, 4: 25.0, 5: 50.0 };
+                            mult = steps[r] || (50.0 * Math.pow(1.5, r - 5));
+                        }
+                        else {
+                            // Для остальных (2-19 мин) — сбалансированная формула
+                            // (Чистая математика * 0.95 маржи, чтобы не уйти в минус)
+                            let chance = 1;
+                            for (let j = 0; j < r; j++) {
+                                chance *= (25 - m - j) / (25 - j);
+                            }
+                            mult = (1 / chance) * 0.95; 
+                        }
+
                         document.getElementById('mines-mult').textContent = 'x' + mult.toFixed(2);
                         document.getElementById('mines-btn').textContent = `ЗАБРАТЬ ${Math.floor(curBet * mult)} ₽`;
                     }
@@ -392,29 +420,6 @@
             minesActive = false;
             document.getElementById('mines-btn').textContent = 'НАЧАТЬ ИГРУ';
             document.getElementById('mines-mult').textContent = 'x1.00';
-        };
-
-        window.handleMines = async () => {
-            if (!minesActive) {
-                const bet = parseInt(document.getElementById('mines-bet').value);
-                const count = parseInt(document.getElementById('mine-count').value);
-                if (bet < 1 || window.userBalance < bet) return alert("Проверьте ставку и баланс");
-                curBet = bet; curMinesCount = count;
-                await window.updateBalance(-bet);
-                minePos = []; while(minePos.length < count) {
-                    let r = Math.floor(Math.random()*25); if(!minePos.includes(r)) minePos.push(r);
-                }
-                revCells = []; minesActive = true;
-                document.querySelectorAll('.mine-cell').forEach(c => { 
-                    c.className = 'mine-cell'; c.innerHTML = ''; 
-                });
-                document.getElementById('mines-btn').textContent = 'ВЫВЕСТИ';
-            } else {
-                const multStr = document.getElementById('mines-mult').textContent.replace('x','');
-                const mult = parseFloat(multStr);
-                await window.updateBalance(Math.floor(curBet * mult));
-                window.initMines();
-            }
         };
 
         // ================= PROMO =================
