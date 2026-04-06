@@ -362,9 +362,9 @@
             btn.disabled = false;
         };
 
-// МИНЫ (ОБНОВЛЕННАЯ ЛОГИКА ИКСОВ)
-        let minesActive = false, minePos = [], revCells = [], curBet = 0, curMinesCount = 3;
-        
+// ================= MINES =================
+        let minesActive = false, minePos = [], revCells = [], curBet = 0, curMinesCount = 3, curMult = 1;
+
         window.initMines = () => {
             const grid = document.getElementById('mines-grid');
             if(!grid) return;
@@ -376,50 +376,92 @@
                 c.onclick = () => {
                     if (!minesActive || revCells.includes(i)) return;
                     revCells.push(i);
+                    
                     if (minePos.includes(i)) {
+                        // ПРОИГРЫШ
                         c.className = 'mine-cell bomb'; c.innerHTML = '💣';
                         minesActive = false;
-                        setTimeout(() => { alert('ВЗРЫВ!'); window.initMines(); }, 300);
+                        // Показываем все остальные бомбы
+                        minePos.forEach(p => {
+                            const cell = grid.children[p];
+                            if(!revCells.includes(p)) { cell.innerHTML = '💣'; cell.style.opacity = '0.5'; }
+                        });
+                        setTimeout(() => { alert('ВЗРЫВ!'); window.initMines(); }, 500);
                     } else {
+                        // УСПЕХ
                         c.className = 'mine-cell gem'; c.innerHTML = '💎';
-                        
-                        const r = revCells.length; // сколько ячеек открыто
-                        const m = curMinesCount;    // сколько мин на поле
-                        let mult = 1;
+                        const r = revCells.length;
+                        const m = curMinesCount;
 
-                        // ЛОГИКА ФИКСИРОВАННЫХ ИКСОВ
+                        // Расчет множителя
                         if (m === 1) {
-                            const steps = {
-                                1: 1.05, 2: 1.09, 3: 1.15, 4: 1.20, 5: 1.30, 
-                                6: 1.40, 7: 1.70, 8: 2.00, 9: 2.50, 10: 3.00, 
-                                11: 4.00, 12: 5.00
-                            };
-                            // Если больше 12 шагов, прибавляем по +1x за шаг
-                            mult = steps[r] || (5.00 + (r - 12));
-                        } 
-                        else if (m >= 20) {
-                            const steps = { 1: 5.0, 2: 10.0, 3: 20.0, 4: 25.0, 5: 50.0 };
-                            mult = steps[r] || (50.0 * Math.pow(1.5, r - 5));
-                        }
-                        else {
-                            // Для остальных (2-19 мин) — сбалансированная формула
-                            // (Чистая математика * 0.95 маржи, чтобы не уйти в минус)
+                            const steps = { 1: 1.05, 2: 1.09, 3: 1.15, 4: 1.2, 5: 1.3, 6: 1.4, 7: 1.7, 8: 2, 9: 2.5, 10: 3, 11: 4, 12: 5 };
+                            curMult = steps[r] || (5 + (r - 12));
+                        } else if (m >= 20) {
+                            const steps = { 1: 5, 2: 10, 3: 20, 4: 25, 5: 50 };
+                            curMult = steps[r] || (50 * Math.pow(1.5, r - 5));
+                        } else {
+                            // Математический расчет для остальных случаев
                             let chance = 1;
-                            for (let j = 0; j < r; j++) {
-                                chance *= (25 - m - j) / (25 - j);
-                            }
-                            mult = (1 / chance) * 0.95; 
+                            for (let j = 0; j < r; j++) chance *= (25 - m - j) / (25 - j);
+                            curMult = (1 / chance) * 0.97; // 0.97 - небольшая комиссия
                         }
 
-                        document.getElementById('mines-mult').textContent = 'x' + mult.toFixed(2);
-                        document.getElementById('mines-btn').textContent = `ЗАБРАТЬ ${Math.floor(curBet * mult)} ₽`;
+                        document.getElementById('mines-mult').textContent = 'x' + curMult.toFixed(2);
+                        document.getElementById('mines-btn').textContent = `ЗАБРАТЬ ${Math.floor(curBet * curMult)} ₽`;
                     }
                 };
                 grid.appendChild(c);
             }
             minesActive = false;
+            curMult = 1;
             document.getElementById('mines-btn').textContent = 'НАЧАТЬ ИГРУ';
             document.getElementById('mines-mult').textContent = 'x1.00';
+        };
+
+        window.handleMines = async () => {
+            if (!minesActive) {
+                // СТАРТ ИГРЫ
+                const betInput = document.getElementById('mines-bet');
+                const countInput = document.getElementById('mine-count');
+                const bet = parseInt(betInput.value);
+                const count = parseInt(countInput.value);
+
+                if (isNaN(bet) || bet < 1 || window.userBalance < bet) return alert("Недостаточно баланса!");
+                if (isNaN(count) || count < 1 || count > 24) return alert("Мин должно быть от 1 до 24");
+
+                curBet = bet;
+                curMinesCount = count;
+                curMult = 1;
+                await window.updateBalance(-bet);
+
+                // Генерируем мины
+                minePos = [];
+                while(minePos.length < count) {
+                    let r = Math.floor(Math.random() * 25);
+                    if(!minePos.includes(r)) minePos.push(r);
+                }
+
+                revCells = [];
+                minesActive = true;
+                
+                // Разблокируем сетку
+                document.querySelectorAll('.mine-cell').forEach(c => { 
+                    c.className = 'mine-cell'; 
+                    c.innerHTML = ''; 
+                });
+                
+                document.getElementById('mines-btn').textContent = 'ВЫВЕСТИ';
+            } else {
+                // ВЫВОД СРЕДСТВ
+                if (revCells.length === 0) return alert("Откройте хотя бы одну ячейку!");
+                
+                const winAmount = Math.floor(curBet * curMult);
+                await window.updateBalance(winAmount);
+                
+                confetti({ particleCount: 100, spread: 70, origin: { y: 0.8 } });
+                window.initMines();
+            }
         };
 
         // ================= PROMO =================
