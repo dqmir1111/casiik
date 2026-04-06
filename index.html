@@ -79,6 +79,7 @@
             document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
             const navBtn = document.getElementById('nav-' + tab);
             if (navBtn) navBtn.classList.add('active');
+            if (tab === 'promo') window.initWheelIfNeeded();
         };
 
         // ADMIN
@@ -197,13 +198,9 @@
 
         function getCrashTarget() {
             const r = Math.random() * 100;
-            // 55% шанс: от 1.01x до 2.50x
             if (r < 55) return (Math.random() * (2.5 - 1.01) + 1.01).toFixed(2);
-            // 25% шанс: от 2.51x до 5.00x
             if (r < 80) return (Math.random() * (5.0 - 2.51) + 2.51).toFixed(2);
-            // 15% шанс: от 5.01x до 15.00x
             if (r < 95) return (Math.random() * (15.0 - 5.01) + 5.01).toFixed(2);
-            // 5% шанс: от 15.01x до 150.00x
             return (Math.random() * (150.0 - 15.01) + 15.01).toFixed(2);
         }
 
@@ -214,7 +211,6 @@
             el.textContent = `x${parseFloat(mult).toFixed(2)}`;
             if (mult >= 10) el.classList.add('gold');
             else if (mult >= 2) el.classList.add('blue');
-            
             hist.prepend(el);
             if (hist.children.length > 7) hist.removeChild(hist.lastChild);
         }
@@ -223,7 +219,6 @@
             const btn = document.getElementById('crash-btn');
             
             if (!crashActive) {
-                // СТАРТ
                 const bet = parseInt(document.getElementById('c-bet').value);
                 if (bet < 1 || isNaN(bet)) return alert("Неверная ставка");
                 if (window.userBalance < bet) return alert("Недостаточно баланса");
@@ -235,7 +230,6 @@
                 crashCurrentMult = 1.00;
                 crashActive = true;
 
-                // UI обновление
                 document.getElementById('crash-rocket').classList.add('flying');
                 const multDisplay = document.getElementById('crash-mult-display');
                 multDisplay.style.color = "#fff";
@@ -249,7 +243,6 @@
 
                 let tickRate = 50;
                 crashInterval = setInterval(async () => {
-                    // Ускорение роста множителя
                     let step = 0.01;
                     if (crashCurrentMult > 2) step = 0.02;
                     if (crashCurrentMult > 5) step = 0.05;
@@ -258,19 +251,16 @@
 
                     crashCurrentMult += step;
 
-                    // КРАШ
                     if (crashCurrentMult >= crashTargetMult) {
                         crashCurrentMult = crashTargetMult;
                         finishCrash(false);
                     } else {
-                        // Апдейт UI
                         multDisplay.textContent = crashCurrentMult.toFixed(2) + 'x';
                         if (crashCurrentMult > 2) multDisplay.style.color = "#60a5fa";
                         if (crashCurrentMult > 10) multDisplay.style.color = "#fbbf24";
                         
                         btn.innerHTML = `ЗАБРАТЬ<br><span style="font-size:0.8rem">${Math.floor(crashBetAmount * crashCurrentMult)} ₽</span>`;
 
-                        // Авто-вывод
                         if (autoEnabled && crashCurrentMult >= autoVal && autoVal <= crashTargetMult) {
                             await cashoutCrash(autoVal);
                         }
@@ -278,7 +268,6 @@
                 }, tickRate);
 
             } else {
-                // РУЧНОЙ ВЫВОД
                 await cashoutCrash(crashCurrentMult);
             }
         };
@@ -321,7 +310,6 @@
             btn.classList.remove('active-btn');
             btn.innerHTML = "ИГРАТЬ";
         }
-
 
         // ================= SLOTS =================
         const symbols = ['💎', '7️⃣', '🍒', '🍋', '🔔', '🌟'];
@@ -440,6 +428,243 @@
             } else alert("Код не найден");
         };
 
+        // ================= WHEEL OF FORTUNE =================
+        const WHEEL_PRIZES = [1, 2, 5, 10, 20, 1, 30, 2, 5, 50, 10, 1, 100, 20, 5];
+        const WHEEL_COLORS = [
+            '#6366f1','#3b82f6','#22c55e','#eab308','#ef4444',
+            '#8b5cf6','#f97316','#06b6d4','#10b981','#a855f7',
+            '#84cc16','#ec4899','#fbbf24','#14b8a6','#e11d48'
+        ];
+        const WHEEL_COOLDOWN = 15 * 60 * 1000;
+
+        let wheelRotation = 0;
+        let wheelSpinning = false;
+        let wheelInitialized = false;
+        let wheelTimerInterval = null;
+
+        window.initWheelIfNeeded = () => {
+            if (wheelInitialized) return;
+            wheelInitialized = true;
+            drawWheel(wheelRotation);
+            startWheelTimer();
+        };
+
+        function drawWheel(rotation) {
+            const canvas = document.getElementById('wheel-canvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const size = canvas.width;
+            const cx = size / 2;
+            const cy = size / 2;
+            const r = cx - 14;
+            const segments = WHEEL_PRIZES.length;
+            const arc = (2 * Math.PI) / segments;
+
+            ctx.clearRect(0, 0, size, size);
+
+            // outer glow ring
+            const grad = ctx.createRadialGradient(cx, cy, r - 4, cx, cy, r + 12);
+            grad.addColorStop(0, 'rgba(99,102,241,0.6)');
+            grad.addColorStop(1, 'rgba(99,102,241,0)');
+            ctx.beginPath();
+            ctx.arc(cx, cy, r + 12, 0, 2 * Math.PI);
+            ctx.fillStyle = grad;
+            ctx.fill();
+
+            for (let i = 0; i < segments; i++) {
+                const startAngle = rotation + i * arc;
+                const endAngle = startAngle + arc;
+
+                // segment fill
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.arc(cx, cy, r, startAngle, endAngle);
+                ctx.closePath();
+
+                const segGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+                segGrad.addColorStop(0.4, WHEEL_COLORS[i]);
+                segGrad.addColorStop(1, shadeColor(WHEEL_COLORS[i], -35));
+                ctx.fillStyle = segGrad;
+                ctx.fill();
+
+                // separator lines
+                ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // prize text
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.rotate(startAngle + arc / 2);
+                ctx.textAlign = 'right';
+                ctx.fillStyle = '#fff';
+                ctx.font = `900 ${WHEEL_PRIZES[i] >= 100 ? 11 : 13}px Inter`;
+                ctx.shadowColor = 'rgba(0,0,0,0.8)';
+                ctx.shadowBlur = 4;
+                ctx.fillText(WHEEL_PRIZES[i] + '₽', r - 10, 5);
+                ctx.restore();
+            }
+
+            // rim
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // center hub
+            const hubGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 22);
+            hubGrad.addColorStop(0, '#7c3aed');
+            hubGrad.addColorStop(1, '#4f46e5');
+            ctx.beginPath();
+            ctx.arc(cx, cy, 22, 0, 2 * Math.PI);
+            ctx.fillStyle = hubGrad;
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // center star icon
+            ctx.fillStyle = '#fff';
+            ctx.font = '14px serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('★', cx, cy);
+        }
+
+        function shadeColor(hex, percent) {
+            const num = parseInt(hex.slice(1), 16);
+            const r = Math.min(255, Math.max(0, (num >> 16) + percent));
+            const g = Math.min(255, Math.max(0, ((num >> 8) & 0xff) + percent));
+            const b = Math.min(255, Math.max(0, (num & 0xff) + percent));
+            return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+        }
+
+        function getWheelCooldownLeft() {
+            const last = parseInt(localStorage.getItem('dqbet_wheel_last') || '0');
+            return Math.max(0, WHEEL_COOLDOWN - (Date.now() - last));
+        }
+
+        function startWheelTimer() {
+            if (wheelTimerInterval) clearInterval(wheelTimerInterval);
+            updateWheelBtn();
+            wheelTimerInterval = setInterval(updateWheelBtn, 1000);
+        }
+
+        function updateWheelBtn() {
+            const left = getWheelCooldownLeft();
+            const btn = document.getElementById('wheel-spin-btn');
+            const timer = document.getElementById('wheel-timer');
+            if (!btn || !timer) return;
+
+            if (left <= 0) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-redo" style="margin-right:8px"></i>КРУТИТЬ';
+                btn.style.opacity = '1';
+                timer.style.display = 'none';
+            } else {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-clock" style="margin-right:8px"></i>ПОДОЖДИТЕ';
+                btn.style.opacity = '0.5';
+                const m = Math.floor(left / 60000);
+                const s = Math.floor((left % 60000) / 1000);
+                timer.style.display = 'block';
+                timer.textContent = `Следующий спин через ${m}:${s.toString().padStart(2, '0')}`;
+            }
+        }
+
+        window.spinWheel = () => {
+            if (wheelSpinning || getWheelCooldownLeft() > 0) return;
+
+            wheelSpinning = true;
+            document.getElementById('wheel-spin-btn').disabled = true;
+
+            const segments = WHEEL_PRIZES.length;
+            const arc = (2 * Math.PI) / segments;
+
+            // weighted random: lower prizes more likely
+            const weights = WHEEL_PRIZES.map(p => {
+                if (p <= 2) return 30;
+                if (p <= 5) return 20;
+                if (p <= 10) return 15;
+                if (p <= 20) return 10;
+                if (p <= 30) return 8;
+                if (p <= 50) return 5;
+                return 2; // 100
+            });
+            const totalW = weights.reduce((a, b) => a + b, 0);
+            let rnd = Math.random() * totalW;
+            let winIdx = 0;
+            for (let i = 0; i < weights.length; i++) {
+                rnd -= weights[i];
+                if (rnd <= 0) { winIdx = i; break; }
+            }
+            const prize = WHEEL_PRIZES[winIdx];
+
+            // spin math: pointer is at top (angle = -π/2 from center)
+            // segment i occupies angles [wheelRotation + i*arc, wheelRotation + (i+1)*arc]
+            // center of winning segment should land at -π/2 (top pointer)
+            const extraSpins = (6 + Math.floor(Math.random() * 4)) * 2 * Math.PI;
+            const segCenterAngle = wheelRotation + winIdx * arc + arc / 2;
+            const pointerAngle = -Math.PI / 2;
+            const diff = ((pointerAngle - segCenterAngle) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+            const finalRotation = wheelRotation + extraSpins + diff;
+
+            const duration = 6000;
+            const startTime = performance.now();
+            const startRotation = wheelRotation;
+
+            // bounce ticker at top
+            let lastTickIdx = -1;
+
+            function easeOut(t) {
+                return 1 - Math.pow(1 - t, 4);
+            }
+
+            function animate(now) {
+                const elapsed = now - startTime;
+                const t = Math.min(elapsed / duration, 1);
+                const current = startRotation + (finalRotation - startRotation) * easeOut(t);
+                wheelRotation = current;
+                drawWheel(current);
+
+                // tick sound visual: detect segment crossing
+                const currentTopSeg = Math.floor(((-current - Math.PI / 2 + 2 * Math.PI * 100) % (2 * Math.PI)) / arc) % segments;
+                if (currentTopSeg !== lastTickIdx) {
+                    lastTickIdx = currentTopSeg;
+                    const pointer = document.getElementById('wheel-pointer');
+                    if (pointer) {
+                        pointer.style.transform = 'translateX(-50%) rotate(15deg)';
+                        setTimeout(() => { if(pointer) pointer.style.transform = 'translateX(-50%) rotate(0deg)'; }, 80);
+                    }
+                }
+
+                if (t < 1) {
+                    requestAnimationFrame(animate);
+                } else {
+                    wheelSpinning = false;
+                    wheelRotation = finalRotation % (2 * Math.PI);
+                    localStorage.setItem('dqbet_wheel_last', Date.now().toString());
+                    window.updateBalance(prize);
+
+                    // show result
+                    const res = document.getElementById('wheel-result');
+                    res.textContent = `🎉 +${prize} ₽`;
+                    res.style.opacity = '1';
+                    res.style.transform = 'translateY(0) scale(1.1)';
+                    confetti({ particleCount: 130, spread: 80, origin: { y: 0.5 } });
+                    setTimeout(() => {
+                        res.style.opacity = '0';
+                        res.style.transform = 'translateY(-10px) scale(1)';
+                    }, 2500);
+
+                    startWheelTimer();
+                }
+            }
+
+            requestAnimationFrame(animate);
+        };
+
         window.onload = () => {
             document.querySelectorAll('.s-reel').forEach(r => {
                 for(let i=0; i<40; i++){
@@ -447,6 +672,10 @@
                 }
             });
             window.initMines();
+            // init wheel immediately if promo tab visible
+            if (document.getElementById('promo-page').classList.contains('active')) {
+                window.initWheelIfNeeded();
+            }
         };
     </script>
 
@@ -478,7 +707,7 @@
         .btn:active { transform: scale(0.97); }
         .btn:disabled { opacity: 0.4; pointer-events: none; }
 
-        /* CRASH STYLES */
+        /* CRASH */
         .c-history-bar { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 5px; margin-bottom: 10px; }
         .c-history-bar::-webkit-scrollbar { display: none; }
         .c-badge { background: #334155; padding: 4px 8px; border-radius: 8px; font-size: 0.75rem; font-weight: 800; color: #cbd5e1; white-space: nowrap; border: 1px solid #475569;}
@@ -486,12 +715,9 @@
         .c-badge.gold { color: #fbbf24; border-color: #d97706; background: rgba(217, 119, 6, 0.1); }
 
         .c-view { height: 220px; background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%); border-radius: 16px; border: 1px solid var(--border); position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 10px; }
-        
         .c-stars { position: absolute; inset: 0; background-image: radial-gradient(#ffffff 1px, transparent 1px); background-size: 20px 20px; opacity: 0.1; }
-        
         .c-mult-val { font-size: 3rem; font-weight: 900; z-index: 2; text-shadow: 0 4px 20px rgba(0,0,0,0.5); transition: color 0.3s; }
         .c-mult-val.crashed { animation: shake 0.4s ease-in-out; }
-        
         .c-rocket { position: absolute; bottom: 20px; font-size: 2.5rem; color: #fff; filter: drop-shadow(0 0 10px rgba(255,255,255,0.5)); transition: transform 0.5s; z-index: 2;}
         .c-rocket.flying { animation: rocketShake 0.5s infinite; transform: translateY(-50px) scale(1.2); color: #60a5fa; filter: drop-shadow(0 10px 20px rgba(96, 165, 250, 0.6)); }
 
@@ -511,18 +737,20 @@
         @keyframes shake { 0%, 100% {transform: translateX(0);} 25% {transform: translateX(-5px);} 50% {transform: translateX(5px);} 75% {transform: translateX(-5px);} }
         @keyframes rocketShake { 0%, 100% {transform: translateY(-50px) rotate(0deg);} 25% {transform: translateY(-52px) rotate(-2deg);} 75% {transform: translateY(-48px) rotate(2deg);} }
 
-        /* SLOTS & MINES STYLES (ОСТАВЛЕНЫ БЕЗ ИЗМЕНЕНИЙ) */
+        /* SLOTS */
         .s-view { display: flex; gap: 8px; justify-content: center; height: 90px; margin: 10px 0; }
         .s-reel-box { width: 80px; height: 90px; position: relative; overflow: hidden; background: #000; border-radius: 12px; border: 1px solid var(--border); box-shadow: inset 0 5px 15px rgba(0,0,0,0.8); }
         .s-reel { position: absolute; width: 100%; top: 0; }
         .s-item { height: 90px; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; text-shadow: 0 2px 5px rgba(0,0,0,0.5);}
 
+        /* MINES */
         .m-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 10px 0; }
         .mine-cell { aspect-ratio: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 6px rgba(0,0,0,0.2);}
         .mine-cell.disabled { opacity: 0.5; background: #0f172a; cursor: default; color: #334155; }
         .mine-cell.gem { background: #059669; box-shadow: inset 0 0 15px #10b981; border-color: #34d399;}
         .mine-cell.bomb { background: #dc2626; box-shadow: inset 0 0 15px #ef4444; border-color: #f87171;}
 
+        /* NAV */
         .nav { position: fixed; bottom: 15px; left: 15px; right: 15px; background: rgba(30, 41, 59, 0.95); border: 1px solid var(--border); border-radius: 20px; display: flex; padding: 8px; backdrop-filter: blur(15px); z-index: 100; box-shadow: 0 10px 30px rgba(0,0,0,0.5);}
         .nav-item { flex: 1; text-align: center; font-size: 0.7rem; font-weight: 700; color: #64748b; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; transition: 0.2s;}
         .nav-item.active { color: #3b82f6; transform: translateY(-2px);}
@@ -531,7 +759,6 @@
         /* MODALS */
         .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; z-index: 999999; padding: 15px; }
         .modal-box { background: var(--card); border: 1px solid var(--accent); padding: 18px; border-radius: 20px; width: 100%; max-width: 360px; box-shadow: 0 0 50px rgba(0,0,0,0.8); }
-
         .adm-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
         .adm-tab { flex: 1; padding: 10px; font-size: 0.65rem; background: #000; border: 1px solid var(--border); color: #fff; border-radius: 8px; font-weight: 800; cursor: pointer; }
         .adm-tab.active { background: var(--accent); border-color: var(--accent); }
@@ -542,6 +769,126 @@
         
         .admin-trigger { text-align: center; margin-top: 25px; margin-bottom: 40px; }
         .admin-btn { background: transparent; color: #475569; border: 1px solid #334155; padding: 8px 16px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; cursor: pointer; transition: 0.2s;}
+
+        /* ===== WHEEL OF FORTUNE ===== */
+        .wheel-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px 12px 12px;
+        }
+
+        .wheel-title {
+            font-size: 1rem;
+            font-weight: 900;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: #fff;
+            margin-bottom: 4px;
+            text-shadow: 0 0 20px rgba(99,102,241,0.6);
+        }
+
+        .wheel-subtitle {
+            font-size: 0.7rem;
+            color: #64748b;
+            font-weight: 600;
+            margin-bottom: 16px;
+            letter-spacing: 1px;
+        }
+
+        .wheel-wrap {
+            position: relative;
+            width: 260px;
+            height: 280px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* pointer triangle */
+        .wheel-pointer {
+            position: absolute;
+            top: -4px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-top: 22px solid #fbbf24;
+            z-index: 10;
+            filter: drop-shadow(0 2px 6px rgba(251,191,36,0.8));
+            transition: transform 0.08s ease;
+            transform-origin: bottom center;
+        }
+
+        #wheel-canvas {
+            width: 260px;
+            height: 260px;
+            display: block;
+            border-radius: 50%;
+            box-shadow: 0 0 30px rgba(79,70,229,0.4), 0 0 60px rgba(79,70,229,0.15);
+        }
+
+        .wheel-result {
+            margin-top: 12px;
+            font-size: 1.5rem;
+            font-weight: 900;
+            color: #fbbf24;
+            text-shadow: 0 0 20px rgba(251,191,36,0.6);
+            opacity: 0;
+            transition: opacity 0.4s, transform 0.4s;
+            transform: translateY(-10px) scale(1);
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #wheel-spin-btn {
+            margin-top: 8px;
+            width: 200px;
+            padding: 14px;
+            border-radius: 50px;
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+            box-shadow: 0 6px 20px rgba(99,102,241,0.5);
+            font-size: 0.95rem;
+            font-weight: 900;
+            letter-spacing: 1px;
+            transition: opacity 0.3s, transform 0.15s;
+        }
+        #wheel-spin-btn:not(:disabled):active { transform: scale(0.95); }
+        #wheel-spin-btn:not(:disabled):hover { box-shadow: 0 8px 25px rgba(99,102,241,0.7); }
+
+        #wheel-timer {
+            display: none;
+            margin-top: 8px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #64748b;
+            letter-spacing: 0.5px;
+        }
+
+        .promo-divider {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 8px 0;
+            padding: 0 4px;
+        }
+        .promo-divider::before, .promo-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+        .promo-divider span {
+            font-size: 0.65rem;
+            font-weight: 700;
+            color: #475569;
+            letter-spacing: 1px;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
@@ -558,22 +905,18 @@
         <div class="balance-badge"><span class="balance-val">0</span> ₽</div>
     </header>
 
+    <!-- CRASH PAGE -->
     <div id="crash-page" class="app-page active">
-        <div class="c-history-bar" id="crash-history-bar">
-            </div>
-
+        <div class="c-history-bar" id="crash-history-bar"></div>
         <div class="c-view">
             <div class="c-stars"></div>
             <div class="c-mult-val" id="crash-mult-display">1.00x</div>
             <div class="c-rocket" id="crash-rocket"><i class="fas fa-space-shuttle" style="transform: rotate(-45deg);"></i></div>
         </div>
-
         <div class="c-controls">
             <div class="c-col">
                 <div class="card" style="margin-bottom: 0; padding: 10px;">
-                    <div class="c-toggle-row">
-                        <span>Ставка</span>
-                    </div>
+                    <div class="c-toggle-row"><span>Ставка</span></div>
                     <div class="input-box" style="margin-bottom: 0; padding: 8px;">
                         <span style="font-size: 1.2rem; color: #fff;">₽</span>
                         <input type="number" id="c-bet" value="10">
@@ -593,13 +936,11 @@
                     </div>
                 </div>
             </div>
-            
-            <button class="btn c-play-btn" id="crash-btn" onclick="window.handleCrash()">
-                ИГРАТЬ
-            </button>
+            <button class="btn c-play-btn" id="crash-btn" onclick="window.handleCrash()">ИГРАТЬ</button>
         </div>
     </div>
 
+    <!-- SLOTS PAGE -->
     <div id="slots-page" class="app-page">
         <div class="card">
             <div class="input-box">
@@ -618,6 +959,7 @@
         </div>
     </div>
 
+    <!-- MINES PAGE -->
     <div id="mines-page" class="app-page">
         <div class="card" style="border-color: #22c55e; padding: 10px; margin-bottom: 10px; background: rgba(34, 197, 94, 0.05);">
             <div style="display: flex; justify-content: space-between; font-weight: 900; color: #4ade80;">
@@ -639,14 +981,42 @@
         </div>
     </div>
 
+    <!-- PROMO PAGE -->
     <div id="promo-page" class="app-page">
-        <div class="card" style="padding: 20px;">
-            <h3 style="margin: 0 0 15px 0; text-align: center; font-weight: 900; color: #fff; letter-spacing: 1px;">ПРОМОКОД</h3>
-            <input type="text" id="promo-input" placeholder="ВВЕДИТЕ КОД" style="width: 100%; padding: 16px; border-radius: 12px; background: rgba(0,0,0,0.4); border: 1px solid var(--border); color: #fff; text-align: center; margin-bottom: 15px; font-weight: 800; font-size: 1.2rem; box-sizing: border-box; text-transform: uppercase;">
+
+        <!-- WHEEL OF FORTUNE -->
+        <div class="card" style="padding: 0; overflow: hidden; border-color: rgba(99,102,241,0.4); background: linear-gradient(160deg, #1e1b4b 0%, #1e293b 100%);">
+            <div class="wheel-section">
+                <div class="wheel-title">🎡 Колесо Удачи</div>
+                <div class="wheel-subtitle">РАЗ В 15 МИНУТ · ОТ 1 ДО 100 ₽</div>
+
+                <div class="wheel-wrap">
+                    <div class="wheel-pointer" id="wheel-pointer"></div>
+                    <canvas id="wheel-canvas" width="260" height="260"></canvas>
+                </div>
+
+                <div class="wheel-result" id="wheel-result"></div>
+
+                <button class="btn" id="wheel-spin-btn" onclick="window.spinWheel()">
+                    <i class="fas fa-redo" style="margin-right:8px"></i>КРУТИТЬ
+                </button>
+                <div id="wheel-timer"></div>
+            </div>
+        </div>
+
+        <!-- DIVIDER -->
+        <div class="promo-divider"><span>ПРОМОКОД</span></div>
+
+        <!-- PROMO CODE -->
+        <div class="card" style="padding: 16px;">
+            <input type="text" id="promo-input" placeholder="ВВЕДИТЕ КОД"
+                style="width: 100%; padding: 16px; border-radius: 12px; background: rgba(0,0,0,0.4); border: 1px solid var(--border); color: #fff; text-align: center; margin-bottom: 12px; font-weight: 800; font-size: 1.1rem; box-sizing: border-box; text-transform: uppercase;">
             <button class="btn" onclick="window.usePromo()">АКТИВИРОВАТЬ</button>
         </div>
+
     </div>
 
+    <!-- BOTTOM NAV -->
     <div class="nav">
         <div class="nav-item active" id="nav-crash" onclick="window.switchTab('crash')"><i class="fas fa-rocket"></i>Краш</div>
         <div class="nav-item" id="nav-slots" onclick="window.switchTab('slots')"><i class="fas fa-gamepad"></i>Слоты</div>
@@ -654,6 +1024,7 @@
         <div class="nav-item" id="nav-promo" onclick="window.switchTab('promo')"><i class="fas fa-gift"></i>Промо</div>
     </div>
 
+    <!-- ADMIN MODAL -->
     <div id="admin-modal" class="modal">
         <div class="modal-box">
             <div class="adm-tabs">
@@ -661,27 +1032,22 @@
                 <button class="adm-tab" onclick="window.switchAdminTab('list')">СПИСОК</button>
                 <button class="adm-tab" onclick="window.switchAdminTab('users')">ЮЗЕРЫ</button>
             </div>
-
             <div id="adm-v-create" class="adm-view" style="display: block;">
                 <input id="adm-n" placeholder="НАЗВАНИЕ КОДА" class="btn" style="background:#000; margin-bottom:6px; border:1px solid var(--border); text-align:left; font-size:0.8rem;">
                 <input id="adm-v" type="number" placeholder="СУММА (₽)" class="btn" style="background:#000; margin-bottom:6px; border:1px solid var(--border); text-align:left; font-size:0.8rem;">
                 <input id="adm-m" type="number" placeholder="ЛИМИТ" class="btn" style="background:#000; margin-bottom:12px; border:1px solid var(--border); text-align:left; font-size:0.8rem;">
                 <button class="btn" onclick="window.createCode()" style="background: #22c55e;">СОЗДАТЬ</button>
-                
                 <div style="margin-top: 20px; display: flex; gap: 5px;">
                     <button class="btn" onclick="window.setTech(true)" style="background: #ef4444; font-size: 0.6rem; padding: 10px;">ВКЛ ТЕХ</button>
                     <button class="btn" onclick="window.setTech(false)" style="background: #22c55e; font-size: 0.6rem; padding: 10px;">ВЫКЛ ТЕХ</button>
                 </div>
             </div>
-
             <div id="adm-v-list" class="adm-view">
                 <div id="adm-code-list"></div>
             </div>
-
             <div id="adm-v-users" class="adm-view">
                 <div id="adm-user-list"></div>
             </div>
-
             <button class="btn" onclick="document.getElementById('admin-modal').style.display='none'" style="background: #334155; margin-top: 15px; box-shadow: none;">ЗАКРЫТЬ</button>
         </div>
     </div>
